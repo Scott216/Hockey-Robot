@@ -15,9 +15,12 @@ Robotic Arm http://www.sainsmart.com/diy-4-axis-servos-control-palletizing-robot
 
 PWM Servo Info, Arm 1:
 Effector:       185 - 580
-Forearm:        215 - 457, range  90 deg
-Bicep:          230 - 456, range 110 deg
+Forearm:        215 - 457, range  90 deg, low value = arm retracted
+Bicep:          230 - 456, range 110 deg, high value =  is retracted
 Rotate:         115 - 500, range 200 deg
+
+
+To keep angle 2 constant, you need to add 1.2pwm to forearm for every 1.0 pwm you subtract from bicep.  This only works in bicep 230 - 390 pwm
 
 
 
@@ -37,7 +40,7 @@ pulselength = map(degrees, 0, 180, SERVOMIN, SERVOMAX);
 
 Change Log
 09/04/15  v1.00 - initial version
-
+09/06/15 - 1.01 - working on inverse kinematics
 
 
 */
@@ -63,7 +66,7 @@ const uint16_t SERVO_ROTATE_RIGHT_LMT = 200;
 // servo address IDs on Adafruit servo board
 const uint8_t SERVO_EFFECTOR = 0; 
 const uint8_t SERVO_FOREARM =  1;
-const uint8_t SERVO_BICEP =    2; //fwd-back
+const uint8_t SERVO_BICEP =    2; // fwd-back
 const uint8_t SERVO_ROTATE =   3; 
 
 
@@ -78,10 +81,10 @@ const uint8_t JOYSTICK_LEFT =  10;
 const uint8_t JOYSTICK_RIGHT =  9;
 const uint8_t JOYSTICK_BUTTON = 8;
 
-// Staring point for arm
-float g_forearmPwm = 406;
-float g_bicepPwm =   281;
-float g_rotatePwm =  300; 
+// Staring point for arm, angle1 = 90, angle 2 = 90
+float g_forearmPwm = 230;
+float g_bicepPwm =   388;
+float g_rotatePwm =  240; 
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(SERVO_SHIELD_ADDR);
 
@@ -103,9 +106,13 @@ void setup()
   pinMode(JOYSTICK_RIGHT,  INPUT_PULLUP);
   pinMode(JOYSTICK_BUTTON, INPUT_PULLUP);
 
+  
   pwm.setPWM(SERVO_FOREARM, 0, g_forearmPwm);
   pwm.setPWM(SERVO_BICEP,   0, g_bicepPwm);
-  pwm.setPWM(SPEED_ROTATE,  0, g_rotatePwm);
+  pwm.setPWM(SERVO_ROTATE,  0, g_rotatePwm);
+
+
+  pwm.setPWM(SERVO_FOREARM, 0, SERVO_FOREARM_FWD_LMT);
 
 }
 
@@ -113,6 +120,20 @@ void setup()
 
 void loop() 
 {
+
+    // TEST - This keeps angle 2 constant if bicep is between 230 - 390 pwm
+    float newBicepPwm = analogRead(A0);
+    g_forearmPwm = g_forearmPwm + (g_bicepPwm - newBicepPwm) * 1.2;
+    g_bicepPwm = newBicepPwm;
+    pwm.setPWM(SERVO_BICEP,   0, g_bicepPwm);
+    pwm.setPWM(SERVO_FOREARM, 0, g_forearmPwm);
+    Serial.print(g_bicepPwm);
+    Serial.print("\t");
+    Serial.print(g_forearmPwm);
+    Serial.print("\t");
+    Serial.println();
+      
+    
   
   // Move robot arm forward, away from goal
   if ( digitalRead(JOYSTICK_FWD) == JOYSTICK_ON )
@@ -121,8 +142,8 @@ void loop()
     if (g_forearmPwm < SERVO_FOREARM_FWD_LMT)
     { g_forearmPwm = SERVO_FOREARM_FWD_LMT; }
     g_bicepPwm = calcBicepPwm(g_forearmPwm);
-    pwm.setPWM(SERVO_FOREARM, 0, g_forearmPwm);
     pwm.setPWM(SERVO_BICEP,   0, g_bicepPwm);
+    pwm.setPWM(SERVO_FOREARM, 0, g_forearmPwm);
     delayMicroseconds(SPEED_FWD_BACK);
   }
 
@@ -245,26 +266,25 @@ void slowMove(int16_t newFwdBk, int16_t newUpDn)
 // armPosition is the position in the Y axis (in mm), z will be constant - the top of the table relative to the pivit point (in mm)
 // angle1 is for the fwd/back servo, angle2 for the up/dn servo
 // The angles calculated from the kinematics formulas need to be conveted to match the orientation of the robotic arm
-// Fwd/Back Servo (1st arm):
-//   Horizantal (angle of zero), pwm = 230
+// Bicep Arm:
+//   Horizantal (almost) (angle of 10), pwm = 230
 //   Vertical (angle of 90), pwm = 394
-// Up/Down Servo (2nd arm):
-//   Horizantal (angle of 90), pwm = 215
-//   Vertucal (angle of 0), pwm = 415
+// Forearm - angle changes if bicep changes
+// Both arms at 90 degrees: Bicep 388, forearm 230
 void MoveFwdBack(float armPositionY, float armPositionZ)
 {
 
   // Inverse kinematic to position the arm
-  const float ARM1 = 140.0;  // arm length in mm, fwd/back servo
-  const float ARM2 = 153.0;  // up/down servo
+  const float ARM1 = 140.0;  // bicep length
+  const float ARM2 = 153.0;  // forarm length 
 
   // Limit arm travel to avoid trig errors 
   if (armPositionY > 279.0)
   { armPositionY = 279.0;} 
   
-  float hyp = sqrt(armPositionY*armPositionY + armPositionZ*armPositionZ);  // calculate hypotenuse, distance from origint to head
+  float hyp = sqrt(armPositionY*armPositionY + armPositionZ*armPositionZ);  // calculate hypotenuse, distance from origin to end of forarm
   
-  // calculate angle for fwd/back servo
+  // calculate angles for arms
   float angle1 = ( atan( armPositionZ / armPositionY ) + acos( (ARM1*ARM1 - ARM2*ARM2 + armPositionY*armPositionY + armPositionZ*armPositionZ) / (2 * ARM1 * hyp) ) ) * RAD_TO_DEG;
   float angle2 = ( acos( (hyp*hyp - ARM1*ARM1 - ARM2*ARM2) / (2 * ARM1 * ARM2) ) ) * RAD_TO_DEG;
   
