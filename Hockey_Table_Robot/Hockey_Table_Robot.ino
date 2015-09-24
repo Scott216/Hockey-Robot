@@ -52,9 +52,11 @@ Change Log
 09/06/15 - 1.01 - working on inverse kinematics
 09/13/15 - 1.02 - Got angles figured out
 09/15/15 - 1.03 - Inverse kinematics are working, but not for the entire range of motion
+09/24/15 - 1.04 - Fine tuning IK
 */
 
-#define VERSION "v1.03"
+#define VERSION "v1.04"
+#define PRINT_DEBUG
 
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
@@ -82,8 +84,8 @@ const uint8_t SERVO_ROTATE =   3;
 enum servoID_t { SERVO_EFFECTOR, SERVO_FOREARM, SERVO_BICEP, SERVO_ROTATE };
 
 const uint8_t JOYSTICK_ON = LOW;  
-const uint16_t SPEED_FWD_BACK = 1000; // uS delay to slow down servo
-const uint16_t SPEED_ROTATE =   5000; // uS delay to slow down servo
+const uint16_t SPEED_FWD_BACK = 10; // uS delay to slow down servo
+const uint16_t SPEED_ROTATE =   1000; // uS delay to slow down servo
 
 
 // Input pins for Joystick
@@ -92,14 +94,15 @@ const uint8_t JOYSTICK_BACK =  11;
 const uint8_t JOYSTICK_LEFT =  10;
 const uint8_t JOYSTICK_RIGHT =  9;
 const uint8_t JOYSTICK_BUTTON = 8;
+const uint8_t AIR_SOLENOID =    7;
 // Save the interrupt pins D2 & D3 in case you want to use an encoder to rotate effector instead of a pot
 
-const uint8_t EFFECTOR_INPUT = A0; // Pot for effector connected to A0
+const uint8_t EFFECTOR_INPUT = A1; // Pot for effector connected to A0
 
 // Staring point for arm, angle1 = 90, angle 2 = 90
 float g_forearmPwm =  230;
 float g_bicepPwm =    388;
-float g_rotatePwm =   240; 
+// float g_rotatePwm =   240; 
 float g_effectorPwm = 300;
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(SERVO_SHIELD_ADDR);
@@ -113,7 +116,7 @@ void setup()
 {
  
   Serial.begin(9600);
-  Serial.print("Hokey Table Robot");
+  Serial.print("Hokey Table Robot ");
   Serial.println(VERSION);
   
   pwm.begin();
@@ -124,22 +127,24 @@ void setup()
   pinMode(JOYSTICK_LEFT,   INPUT_PULLUP);
   pinMode(JOYSTICK_RIGHT,  INPUT_PULLUP);
   pinMode(JOYSTICK_BUTTON, INPUT_PULLUP);
+  pinMode(AIR_SOLENOID,          OUTPUT);
 
   // Initial position for robot arm
   pwm.setPWM(SERVO_FOREARM,  0, g_forearmPwm);
   pwm.setPWM(SERVO_BICEP,    0, g_bicepPwm);
-  pwm.setPWM(SERVO_ROTATE,   0, getServoPwm(SERVO_ROTATE,   0));
-  pwm.setPWM(SERVO_EFFECTOR, 0, getServoPwm(SERVO_EFFECTOR, 0));
-  delay(1000);
 
-}
+  pwm.setPWM(SERVO_ROTATE,   0, getServoPwm(SERVO_ROTATE, 0));
+  pwm.setPWM(SERVO_EFFECTOR, 0, getServoPwm(SERVO_EFFECTOR, map(analogRead(EFFECTOR_INPUT), 0, 505, 45, -45)));
+  MoveFwdBack(75, -90);
+  
+}  // emd setup()
 
 
 
 void loop() 
 {
   static float yPos =         75.0;  // Y position in mmm
-  static float zPos =        -86.0;  // Z position in mm, should always be the same
+  static float zPos =       -90.0;  // Z position in mm, should always be the same
   static float rotateAngle =   0.0;  // Angle of arm +/- 90
   static float effectorAngle = 0.0;  // Effector angle +/190
   static float effectorAngleOld = 0.0; // Previous effector angle  
@@ -152,28 +157,31 @@ void loop()
   // Move robot arm forward, away from goal
   if ( digitalRead(JOYSTICK_FWD) == JOYSTICK_ON )
   {
-    yPos = yPos + 0.5; 
+    yPos = yPos + 0.75; 
     MoveFwdBack(yPos, zPos);
-    delayMicroseconds(SPEED_FWD_BACK);
+ //   delayMicroseconds(SPEED_FWD_BACK);
   }
 
   // Move robot arm back, toward from goal
   if ( digitalRead(JOYSTICK_BACK) == JOYSTICK_ON ) 
   {
-    yPos = yPos - 0.5; 
+    yPos = yPos - 0.75; 
     MoveFwdBack(yPos, zPos);
-    delayMicroseconds(SPEED_FWD_BACK);
+ //   delayMicroseconds(SPEED_FWD_BACK);
   }
   
-  // rotate arm to the left
+  // Rotate arm to the left
   if ( digitalRead(JOYSTICK_LEFT) == JOYSTICK_ON ) 
   {
     rotateAngle = rotateAngle + 0.5;
+    
+    // Don't let arm hit back wall
+    float backWallAngle = 0.088 * yPos + 58.828;
+    if ( rotateAngle > backWallAngle )
+    { rotateAngle = backWallAngle; }
+    
     pwm.setPWM(SERVO_ROTATE, 0, getServoPwm(SERVO_ROTATE, rotateAngle));
     
-    // Move the effector in the opposite direction
-    effectorAngle = effectorAngle - 0.5;
-    pwm.setPWM(SERVO_EFFECTOR, 0, getServoPwm(SERVO_EFFECTOR, effectorAngle));
     delayMicroseconds(SPEED_ROTATE);
   }
 
@@ -181,25 +189,61 @@ void loop()
   if ( digitalRead(JOYSTICK_RIGHT) == JOYSTICK_ON ) 
   {
     rotateAngle = rotateAngle - 0.5;
+
+    // Don't let arm hit back wall
+    float backWallAngle = -1.0 * (0.088 * yPos + 58.828) ;
+    if ( rotateAngle < backWallAngle )
+    { rotateAngle = backWallAngle; }
+
     pwm.setPWM(SERVO_ROTATE, 0, getServoPwm(SERVO_ROTATE, rotateAngle));
 
-    // Move the effector in the opposite direction
-    effectorAngle = effectorAngle + 0.5;
-    pwm.setPWM(SERVO_EFFECTOR, 0, getServoPwm(SERVO_EFFECTOR, effectorAngle));
     delayMicroseconds(SPEED_ROTATE);
   }
 
   // Swing effector - contoled by a potientiometer connected to analog input
-  effectorAngle = map(analogRead(EFFECTOR_INPUT), -45, 45, 0, 512);
+  effectorAngle = map(analogRead(EFFECTOR_INPUT), 0, 505, 45, -45); 
+  /*
+  delay(50);
+  Serial.print(analogRead(EFFECTOR_INPUT));
+  Serial.print("   ");
+  Serial.print(effectorAngle);
+  Serial.print("   ");
+  Serial.println(getServoPwm(SERVO_EFFECTOR, effectorAngle)); */
   if ( effectorAngle != effectorAngleOld)
   { 
     pwm.setPWM(SERVO_EFFECTOR, 0, getServoPwm(SERVO_EFFECTOR, effectorAngle)); 
     effectorAngleOld = effectorAngle;
   }
   
+  // Turn on air
+  static uint32_t airOnTime = millis();  // Timer to keep air solenoid open when trigger is pushed
+  static uint32_t airDelayTimer = millis(); // time user has to wait between trigger pulls
+  if ( digitalRead(JOYSTICK_BUTTON) == LOW && millis() > airDelayTimer )
+  { 
+    digitalWrite(AIR_SOLENOID, HIGH);  // Open air solenoid
+    airOnTime = millis() + 200;        // Keep solenoid open for 200mS
+    airDelayTimer = millis() + 500;    // Don't let user fire again for 300mS
+  }
+  
+  // Turn off air
+  if (millis() > airOnTime)
+  { digitalWrite(AIR_SOLENOID, LOW); }
+
+  #ifdef PRINT_DEBUG
+    Serial.print("Y:");
+    Serial.print(yPos);
+    Serial.print("  Z:");
+    Serial.print(zPos);
+    Serial.print("  A:");
+    Serial.print(rotateAngle);
+    Serial.print(" ");
+    Serial.print(getServoPwm(SERVO_ROTATE, rotateAngle));
+    Serial.print("  E:");
+    Serial.print(effectorAngle);
+    Serial.println();
+  #endif
+    
 }  // end loop()
-
-
 
 
 
@@ -214,12 +258,7 @@ void loop()
 // Both arms at 90 degrees: Bicep 388, forearm 230
 bool MoveFwdBack(float armPositionY, float armPositionZ)
 {
-
-  Serial.print(armPositionY);
-  Serial.print("\t");
-  Serial.print(armPositionZ);
-  Serial.print("\t");
-  
+ 
   // Inverse kinematic to position the arm
   const float BICEP_LEN_MM =   140.0;  // bicep length in mm
   const float FOREARM_LEN_MM = 153.0;  // forarm length in mm
@@ -239,18 +278,6 @@ bool MoveFwdBack(float armPositionY, float armPositionZ)
   uint16_t pwmBicep =   getServoPwm(SERVO_BICEP,   angle1degree);
   uint16_t pwmForearm = getServoPwm(SERVO_FOREARM, angle3degree);
 
-  Serial.print(angle1degree);
-  Serial.print("\t");
-  Serial.print(angle2degree);
-  Serial.print("\t");
-  Serial.print(angle3degree);
-  Serial.print("\t");
-  Serial.print(pwmBicep);
-  Serial.print("\t");
-  Serial.print(pwmForearm);
-  Serial.println();
-
-
 
   // Check for calculation errors
   if (angle1degree != angle1degree )
@@ -264,7 +291,7 @@ bool MoveFwdBack(float armPositionY, float armPositionZ)
   pwm.setPWM(SERVO_FOREARM, 0, pwmForearm);
   
   return true;
-}
+}  // end MoveFwdBack()
 
 
 int16_t getServoPwm(servoID_t servoID, int16_t servoAngle)
