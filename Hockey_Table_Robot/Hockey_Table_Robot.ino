@@ -44,11 +44,11 @@ Change Log
 09/13/15 - 1.02 - Got angles figured out
 09/15/15 - 1.03 - Inverse kinematics are working, but not for the entire range of motion
 09/24/15 - 1.04 - Fine tuning IK
-09/25/15 - 1.05 - More fine tuning. Pass pointer to MoveFwdBack()
+09/25/15 - 1.05 - More fine tuning. Pass pointer to MoveFwdBack().  Added pwm compensation to bicep to keep effector level
 */
 
 #define VERSION "v1.05"
-#define PRINT_DEBUG
+//#define PRINT_DEBUG
 
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
@@ -71,22 +71,26 @@ const uint8_t JOYSTICK_BUTTON = 8;
 const uint8_t AIR_SOLENOID =    7;
 
 const uint8_t EFFECTOR_INPUT = A1; // Pot for effector connected to Analog in
-const float Z_POSITION = -70; 
-const float JOYSTICK_STEP_FWDBACK = 0.75;
-const float JOYSTICK_STEP_LR = 0.5;
+const float Z_POSITION = -60; 
+const uint16_t Y_START =  75; 
+const uint16_t Y_MIN =    25; 
+const uint16_t Y_MAX =   177; 
 
-// Staring point for arm, angle1 = 90, angle 2 = 90
-float g_forearmPwm =  230;
-float g_bicepPwm =    388;
-// float g_rotatePwm =   240; 
-float g_effectorPwm = 300;
+// Serial.print really slows things down, compensate by makinng steps bigger
+#ifdef PRINT_DEBUG
+  const float JOYSTICK_STEP_FWDBACK = 0.75;
+  const float JOYSTICK_STEP_LR = 3.0;
+  #else
+  const float JOYSTICK_STEP_FWDBACK = 0.75;
+  const float JOYSTICK_STEP_LR = 0.25;
+#endif
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(SERVO_SHIELD_ADDR);
 
 // function prototypes
 int16_t getServoPwm(servoID_t servoID, int16_t servoAngle);
 bool MoveFwdBack(float *&armPositionY, float *armPositionZ);
-
+float bicepPwmCompensation(float y);
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
@@ -108,24 +112,20 @@ void setup()
   pinMode(AIR_SOLENOID,          OUTPUT);
 
   // Initial position for robot arm
-  pwm.setPWM(SERVO_FOREARM,  0, g_forearmPwm);
-  pwm.setPWM(SERVO_BICEP,    0, g_bicepPwm);
-
   pwm.setPWM(SERVO_ROTATE,   0, getServoPwm(SERVO_ROTATE, 0));
   pwm.setPWM(SERVO_EFFECTOR, 0, getServoPwm(SERVO_EFFECTOR, map(analogRead(EFFECTOR_INPUT), 0, 505, 45, -45)));
-  float yStart = 0.0;
+  float yStart = Y_START;
   float zStart = Z_POSITION;
   MoveFwdBack(&yStart, &zStart);
   
-}  // emd setup()
-
+}  // end setup()
 
 
 // ---------------------------------------------------------------------------
 // ---------------------------------------------------------------------------
 void loop() 
 {
-  static float yPos =            75.0;  // Y position in mm
+  static float yPos =         Y_START;  // Y position in mm
   static float zPos =      Z_POSITION;  // Z position in mm, should always be the same
   static float rotateAngle =      0.0;  // Angle of arm +/- 90
   static float effectorAngle =    0.0;  // Effector angle +/190
@@ -136,6 +136,8 @@ void loop()
   if ( digitalRead(JOYSTICK_FWD) == JOYSTICK_ON )
   {
     yPos = yPos + JOYSTICK_STEP_FWDBACK; 
+    if ( yPos > Y_MAX )
+    { yPos = Y_MAX; }
     MoveFwdBack(&yPos, &zPos);
  //   delayMicroseconds(SPEED_FWD_BACK);
   }
@@ -144,14 +146,26 @@ void loop()
   if ( digitalRead(JOYSTICK_BACK) == JOYSTICK_ON ) 
   {
     yPos = yPos - JOYSTICK_STEP_FWDBACK; 
+    if ( yPos < Y_MIN )
+    { yPos = Y_MIN; }
     MoveFwdBack(&yPos, &zPos);
  //   delayMicroseconds(SPEED_FWD_BACK);
   }
   
+  // Adjust angle step based on y position.  When arm is extended out, it should rotate slower then when retracted
+  float rotateStep = JOYSTICK_STEP_LR;
+  if ( yPos < 90.0 )
+  { rotateStep = JOYSTICK_STEP_LR; }
+  else if (yPos < 140.0 )
+  { rotateStep = JOYSTICK_STEP_LR / 1.25; }
+  else
+  { rotateStep = JOYSTICK_STEP_LR / 1.5; }
+  
+  
   // Rotate arm to the left
   if ( digitalRead(JOYSTICK_LEFT) == JOYSTICK_ON ) 
   {
-    rotateAngle = rotateAngle + JOYSTICK_STEP_LR;
+    rotateAngle = rotateAngle + rotateStep;
     
     // Don't let arm hit back wall
     float backWallAngle = 0.088 * yPos + 58.828;
@@ -166,7 +180,7 @@ void loop()
   // rotate arm to the right
   if ( digitalRead(JOYSTICK_RIGHT) == JOYSTICK_ON ) 
   {
-    rotateAngle = rotateAngle - JOYSTICK_STEP_LR;
+    rotateAngle = rotateAngle - rotateStep;
 
     // Don't let arm hit back wall
     float backWallAngle = -1.0 * (0.088 * yPos + 58.828) ;
@@ -186,19 +200,8 @@ void loop()
     effectorAngleOld = effectorAngle;
   }
   
-  // Turn on air
-  static uint32_t airOnTime = millis();  // Timer to keep air solenoid open when trigger is pushed
-  static uint32_t airDelayTimer = millis(); // time user has to wait between trigger pulls
-  if ( digitalRead(JOYSTICK_BUTTON) == LOW && millis() > airDelayTimer )
-  { 
-    digitalWrite(AIR_SOLENOID, HIGH);  // Open air solenoid
-    airOnTime = millis() + 200;        // Keep solenoid open for 200mS
-    airDelayTimer = millis() + 500;    // Don't let user fire again for 300mS
-  }
-  
-  // Turn off air
-  if (millis() > airOnTime)
-  { digitalWrite(AIR_SOLENOID, LOW); }
+   // turn air on/off
+   digitalWrite(AIR_SOLENOID, !digitalRead(JOYSTICK_BUTTON));
 
   #ifdef PRINT_DEBUG
     Serial.print("Y:");
@@ -215,7 +218,6 @@ void loop()
   #endif
     
 }  // end loop()
-
 
 
 // ---------------------------------------------------------------------------
@@ -240,7 +242,6 @@ bool MoveFwdBack(float *armPositionY, float *armPositionZ)
   if (*armPositionY <= 0)
   { *armPositionY =  0.1; } 
 
-  
   float hyp = sqrt( *armPositionY * *armPositionY + *armPositionZ * *armPositionZ);  // calculate hypotenuse, distance from origin to end of forarm
   
   // Calculate angles for forearm and bicep servos (Y-Z plane)
@@ -259,9 +260,8 @@ bool MoveFwdBack(float *armPositionY, float *armPositionZ)
 
   if (angle2degree != angle2degree )
   { return false; }
-
   
-  pwm.setPWM(SERVO_BICEP,   0, pwmBicep);
+  pwm.setPWM(SERVO_BICEP,   0, pwmBicep + bicepPwmCompensation(*armPositionY));  // Manualy adjust Bicep to keep effector level
   pwm.setPWM(SERVO_FOREARM, 0, pwmForearm);
   
   return true;
@@ -292,6 +292,31 @@ int16_t getServoPwm(servoID_t servoID, int16_t servoAngle)
   } 
 }  // end getServoPwm()
 
+// ---------------------------------------------------------------------------
+// Plotted the bicep PWM compensation neeeded to keep z level verses y and got best
+// fit line.  R squared is 0.97
+// Bicep Comp = 0.003375Y^2 - 1.021Y + 18.217
+// ---------------------------------------------------------------------------
+float bicepPwmCompensation(float y)
+{
+  float bicepComp = (0.003375 * y * y) - (1.021 * y) + 18.217;
+  return bicepComp;
+}  // end bicepPwmCompensation()
+
+
+
+// ---------------------------------------------------------------------------
+// Z compensation
+// Plotted z hight from table vs Y value then found a best fit line
+// Line fit very well R = 0.998
+// Z = -0.0027Y^2 + 0.837Y - 89.64
+// ---------------------------------------------------------------------------
+float zCompensation(float y)
+{
+//  float newZ =  (-0.0027 * y  * y) + (0.837 * y) - 89.64;
+//  return newZ + Z_POSITION; 
+}  // end zCompensation()
+
 
 // ---------------------------------------------------------------------------
 // This equation is derived from manually moving the arm with Z fixed then plotting the points 
@@ -299,7 +324,7 @@ int16_t getServoPwm(servoID_t servoID, int16_t servoAngle)
 // ---------------------------------------------------------------------------
 uint16_t calcBicepPwm (float forearmPwm)
 {
-  return (-0.0038 * forearmPwm * forearmPwm) + (3.3112 * forearmPwm) - 437.85;
+//  return (-0.0038 * forearmPwm * forearmPwm) + (3.3112 * forearmPwm) - 437.85;
 }  // end calcBicepPwm()
 
 
