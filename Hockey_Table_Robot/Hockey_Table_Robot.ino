@@ -1,6 +1,8 @@
 /*
 Board: Uno
 
+Source code: https://github.com/Scott216/Hockey-Robot
+
 Program uses Arduino Uno with Adafruit I2C servo shield to control two robotic arms mounted to a hockey table
 Users can move arms back and forth and flick the hockey puck.  Flicking the hockey puck uses a spring loaded
 mechanism.
@@ -29,10 +31,6 @@ Rotate
 
 
 
-To keep angle 2 constant, you need to add 1.2pwm to forearm for every 1.0 pwm you subtract from bicep.  This only works in bicep 230 - 390 pwm
-
-
-
 Kinematics:
 http://www.oliverjenkins.com/blog/2012/9/inverse-kinematics-and-robot-arms
 http://www.learnaboutrobots.com/inverseKinematics.htm
@@ -40,11 +38,6 @@ http://www.learnaboutrobots.com/inverseKinematics.htm
 Formula by fitting curve to points
 fwdback = (-0.0038 * UpDown^2) + (3.3112 * UpDown) - 437.85
 max range of up/down server: 310 - 492 pwm.  310 pwm arm is extended out
-
-
-Convert to degrees to pulse length
-pulselength = map(degrees, 0, 180, SERVOMIN, SERVOMAX);
-
 
 
 Change Log
@@ -62,25 +55,7 @@ Change Log
 #include <Adafruit_PWMServoDriver.h>
 
 #define SERVO_SHIELD_ADDR 0x40
-// Depending on your servo make, the pulse width min and max may vary, you 
-// want these to be as small/large as possible without hitting the hard stop
-// for max range. You'll have to tweak them as necessary to match the servos you
-// have!
 
-// PWM range for forearm servo.  Bicep servo will be a calculation
-const uint16_t SERVO_FOREARM_BCK_LMT =  492;  // This is retracted
-const uint16_t SERVO_FOREARM_FWD_LMT =  310;  // This is extended
-const uint16_t SERVO_ROTATE_LEFT_LMT =  400;
-const uint16_t SERVO_ROTATE_RIGHT_LMT = 200;
-
-
-/*
-// servo address IDs on Adafruit servo board
-const uint8_t SERVO_EFFECTOR = 0; 
-const uint8_t SERVO_FOREARM =  1;
-const uint8_t SERVO_BICEP =    2; // fwd-back
-const uint8_t SERVO_ROTATE =   3; 
-*/
 enum servoID_t { SERVO_EFFECTOR, SERVO_FOREARM, SERVO_BICEP, SERVO_ROTATE };
 
 const uint8_t JOYSTICK_ON = LOW;  
@@ -95,7 +70,6 @@ const uint8_t JOYSTICK_LEFT =  10;
 const uint8_t JOYSTICK_RIGHT =  9;
 const uint8_t JOYSTICK_BUTTON = 8;
 const uint8_t AIR_SOLENOID =    7;
-// Save the interrupt pins D2 & D3 in case you want to use an encoder to rotate effector instead of a pot
 
 const uint8_t EFFECTOR_INPUT = A1; // Pot for effector connected to A0
 
@@ -270,7 +244,8 @@ bool MoveFwdBack(float armPositionY, float armPositionZ)
   
   float hyp = sqrt(armPositionY*armPositionY + armPositionZ*armPositionZ);  // calculate hypotenuse, distance from origin to end of forarm
   
-  // calculate angles for arms
+  // Calculate angles for forearm and bicep servos (Y-Z plane)
+  // See: https://github.com/Scott216/Hockey-Robot/blob/master/Arm%20Angles.jpg
   float angle1degree = ( atan( armPositionZ / armPositionY ) + acos( (BICEP_LEN_MM*BICEP_LEN_MM - FOREARM_LEN_MM*FOREARM_LEN_MM + armPositionY*armPositionY + armPositionZ*armPositionZ) / (2 * BICEP_LEN_MM * hyp) ) ) * RAD_TO_DEG;
   float angle2degree = 180.0 - ( acos( (hyp*hyp - BICEP_LEN_MM*BICEP_LEN_MM - FOREARM_LEN_MM*FOREARM_LEN_MM) / (2 * BICEP_LEN_MM * FOREARM_LEN_MM) ) ) * RAD_TO_DEG;
   float angle3degree = 180.0 - angle1degree - angle2degree;
@@ -325,7 +300,6 @@ uint16_t calcBicepPwm (float forearmPwm)
 {
   return (-0.0038 * forearmPwm * forearmPwm) + (3.3112 * forearmPwm) - 437.85;
 }  // end calcBicepPwm()
-
 
 
 
