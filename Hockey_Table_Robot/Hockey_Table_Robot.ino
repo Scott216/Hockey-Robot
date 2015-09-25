@@ -29,8 +29,6 @@ Bicep        230      5      394      90
 Rotate
 
 
-
-
 Kinematics:
 http://www.oliverjenkins.com/blog/2012/9/inverse-kinematics-and-robot-arms
 http://www.learnaboutrobots.com/inverseKinematics.htm
@@ -46,9 +44,10 @@ Change Log
 09/13/15 - 1.02 - Got angles figured out
 09/15/15 - 1.03 - Inverse kinematics are working, but not for the entire range of motion
 09/24/15 - 1.04 - Fine tuning IK
+09/25/15 - 1.05 - More fine tuning. Pass pointer to MoveFwdBack()
 */
 
-#define VERSION "v1.04"
+#define VERSION "v1.05"
 #define PRINT_DEBUG
 
 #include <Wire.h>
@@ -71,7 +70,10 @@ const uint8_t JOYSTICK_RIGHT =  9;
 const uint8_t JOYSTICK_BUTTON = 8;
 const uint8_t AIR_SOLENOID =    7;
 
-const uint8_t EFFECTOR_INPUT = A1; // Pot for effector connected to A0
+const uint8_t EFFECTOR_INPUT = A1; // Pot for effector connected to Analog in
+const float Z_POSITION = -70; 
+const float JOYSTICK_STEP_FWDBACK = 0.75;
+const float JOYSTICK_STEP_LR = 0.5;
 
 // Staring point for arm, angle1 = 90, angle 2 = 90
 float g_forearmPwm =  230;
@@ -83,9 +85,11 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(SERVO_SHIELD_ADDR);
 
 // function prototypes
 int16_t getServoPwm(servoID_t servoID, int16_t servoAngle);
-bool MoveFwdBack(float armPositionY, float armPositionZ);
+bool MoveFwdBack(float *&armPositionY, float *armPositionZ);
 
 
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 void setup() 
 {
  
@@ -109,45 +113,45 @@ void setup()
 
   pwm.setPWM(SERVO_ROTATE,   0, getServoPwm(SERVO_ROTATE, 0));
   pwm.setPWM(SERVO_EFFECTOR, 0, getServoPwm(SERVO_EFFECTOR, map(analogRead(EFFECTOR_INPUT), 0, 505, 45, -45)));
-  MoveFwdBack(75, -90);
+  float yStart = 0.0;
+  float zStart = Z_POSITION;
+  MoveFwdBack(&yStart, &zStart);
   
 }  // emd setup()
 
 
 
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 void loop() 
 {
-  static float yPos =         75.0;  // Y position in mmm
-  static float zPos =       -90.0;  // Z position in mm, should always be the same
-  static float rotateAngle =   0.0;  // Angle of arm +/- 90
-  static float effectorAngle = 0.0;  // Effector angle +/190
-  static float effectorAngleOld = 0.0; // Previous effector angle  
+  static float yPos =            75.0;  // Y position in mm
+  static float zPos =      Z_POSITION;  // Z position in mm, should always be the same
+  static float rotateAngle =      0.0;  // Angle of arm +/- 90
+  static float effectorAngle =    0.0;  // Effector angle +/190
+  static float effectorAngleOld = 0.0;  // Previous effector angle  
 
-    
-//  MoveFwdBack((float)analogRead(A0)/1.5, (float)analogRead(A1)/1.5 - 100 );
-//  delay(25);
   
-
   // Move robot arm forward, away from goal
   if ( digitalRead(JOYSTICK_FWD) == JOYSTICK_ON )
   {
-    yPos = yPos + 0.75; 
-    MoveFwdBack(yPos, zPos);
+    yPos = yPos + JOYSTICK_STEP_FWDBACK; 
+    MoveFwdBack(&yPos, &zPos);
  //   delayMicroseconds(SPEED_FWD_BACK);
   }
 
   // Move robot arm back, toward from goal
   if ( digitalRead(JOYSTICK_BACK) == JOYSTICK_ON ) 
   {
-    yPos = yPos - 0.75; 
-    MoveFwdBack(yPos, zPos);
+    yPos = yPos - JOYSTICK_STEP_FWDBACK; 
+    MoveFwdBack(&yPos, &zPos);
  //   delayMicroseconds(SPEED_FWD_BACK);
   }
   
   // Rotate arm to the left
   if ( digitalRead(JOYSTICK_LEFT) == JOYSTICK_ON ) 
   {
-    rotateAngle = rotateAngle + 0.5;
+    rotateAngle = rotateAngle + JOYSTICK_STEP_LR;
     
     // Don't let arm hit back wall
     float backWallAngle = 0.088 * yPos + 58.828;
@@ -162,7 +166,7 @@ void loop()
   // rotate arm to the right
   if ( digitalRead(JOYSTICK_RIGHT) == JOYSTICK_ON ) 
   {
-    rotateAngle = rotateAngle - 0.5;
+    rotateAngle = rotateAngle - JOYSTICK_STEP_LR;
 
     // Don't let arm hit back wall
     float backWallAngle = -1.0 * (0.088 * yPos + 58.828) ;
@@ -176,13 +180,6 @@ void loop()
 
   // Swing effector - contoled by a potientiometer connected to analog input
   effectorAngle = map(analogRead(EFFECTOR_INPUT), 0, 505, 45, -45); 
-  /*
-  delay(50);
-  Serial.print(analogRead(EFFECTOR_INPUT));
-  Serial.print("   ");
-  Serial.print(effectorAngle);
-  Serial.print("   ");
-  Serial.println(getServoPwm(SERVO_EFFECTOR, effectorAngle)); */
   if ( effectorAngle != effectorAngleOld)
   { 
     pwm.setPWM(SERVO_EFFECTOR, 0, getServoPwm(SERVO_EFFECTOR, effectorAngle)); 
@@ -221,6 +218,7 @@ void loop()
 
 
 
+// ---------------------------------------------------------------------------
 // Moves the arm forward or backward, keeping the head on the table
 // armPosition is the position in the Y axis (in mm), z will be constant - the top of the table relative to the pivit point (in mm)
 // angle1 is for the bicep servo, angle3 for the forearm
@@ -230,7 +228,8 @@ void loop()
 //   Vertical (angle of 90), pwm = 394
 // Forearm - angle changes if bicep changes
 // Both arms at 90 degrees: Bicep 388, forearm 230
-bool MoveFwdBack(float armPositionY, float armPositionZ)
+// ---------------------------------------------------------------------------
+bool MoveFwdBack(float *armPositionY, float *armPositionZ)
 {
  
   // Inverse kinematic to position the arm
@@ -238,16 +237,16 @@ bool MoveFwdBack(float armPositionY, float armPositionZ)
   const float FOREARM_LEN_MM = 153.0;  // forarm length in mm
 
   // Limit arm travel to avoid trig errors 
-  if (armPositionY <= 0)
-  { armPositionY =  0.1; } 
+  if (*armPositionY <= 0)
+  { *armPositionY =  0.1; } 
 
   
-  float hyp = sqrt(armPositionY*armPositionY + armPositionZ*armPositionZ);  // calculate hypotenuse, distance from origin to end of forarm
+  float hyp = sqrt( *armPositionY * *armPositionY + *armPositionZ * *armPositionZ);  // calculate hypotenuse, distance from origin to end of forarm
   
   // Calculate angles for forearm and bicep servos (Y-Z plane)
   // See: https://github.com/Scott216/Hockey-Robot/blob/master/Arm%20Angles.jpg
-  float angle1degree = ( atan( armPositionZ / armPositionY ) + acos( (BICEP_LEN_MM*BICEP_LEN_MM - FOREARM_LEN_MM*FOREARM_LEN_MM + armPositionY*armPositionY + armPositionZ*armPositionZ) / (2 * BICEP_LEN_MM * hyp) ) ) * RAD_TO_DEG;
-  float angle2degree = 180.0 - ( acos( (hyp*hyp - BICEP_LEN_MM*BICEP_LEN_MM - FOREARM_LEN_MM*FOREARM_LEN_MM) / (2 * BICEP_LEN_MM * FOREARM_LEN_MM) ) ) * RAD_TO_DEG;
+  float angle1degree = ( atan( *armPositionZ / *armPositionY ) + acos( (BICEP_LEN_MM * BICEP_LEN_MM - FOREARM_LEN_MM * FOREARM_LEN_MM + *armPositionY * *armPositionY + *armPositionZ * *armPositionZ) / (2 * BICEP_LEN_MM * hyp) ) ) * RAD_TO_DEG;
+  float angle2degree = 180.0 - ( acos( (hyp * hyp - BICEP_LEN_MM*BICEP_LEN_MM - FOREARM_LEN_MM * FOREARM_LEN_MM) / (2 * BICEP_LEN_MM * FOREARM_LEN_MM) ) ) * RAD_TO_DEG;
   float angle3degree = 180.0 - angle1degree - angle2degree;
   
   uint16_t pwmBicep =   getServoPwm(SERVO_BICEP,   angle1degree);
@@ -269,9 +268,10 @@ bool MoveFwdBack(float armPositionY, float armPositionZ)
 }  // end MoveFwdBack()
 
 
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 int16_t getServoPwm(servoID_t servoID, int16_t servoAngle)
 {
-
   switch (servoID)
   {
     case SERVO_EFFECTOR:
@@ -290,12 +290,13 @@ int16_t getServoPwm(servoID_t servoID, int16_t servoAngle)
       return 300;
       break;
   } 
-  
 }  // end getServoPwm()
 
 
+// ---------------------------------------------------------------------------
 // This equation is derived from manually moving the arm with Z fixed then plotting the points 
 // and finding the best fit line
+// ---------------------------------------------------------------------------
 uint16_t calcBicepPwm (float forearmPwm)
 {
   return (-0.0038 * forearmPwm * forearmPwm) + (3.3112 * forearmPwm) - 437.85;

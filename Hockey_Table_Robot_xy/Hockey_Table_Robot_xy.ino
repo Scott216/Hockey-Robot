@@ -46,9 +46,10 @@ Change Log
 09/15/15 - 1.03 - Inverse kinematics are working, but not for the entire range of motion
 09/24/15 - 1.04 - Fine tuning IK
 09/24/15 - 1.05 - change to X-Y positioning from Angle-Y.  This way using joystick is more intuitive 
+09/25/15 - 2.00 - Changed ver to 2x so it's more distinct from original
 */
 
-#define VERSION "v1.05"
+#define VERSION "v2.00"
 //#define PRINT_DEBUG2
 
 #include <Wire.h>
@@ -73,7 +74,7 @@ const uint8_t JOYSTICK_BUTTON = 8;
 const uint8_t AIR_SOLENOID =    7;
 // Save the interrupt pins D2 & D3 in case you want to use an encoder to rotate effector instead of a pot
 
-const uint8_t EFFECTOR_INPUT = A1; // Pot for effector connected to A0
+const uint8_t EFFECTOR_INPUT = A1; // Pot for effector connected to Analog in
 const float Z_POSITION = -70; 
 const float X_JOYSTICK_STEP = 0.5;
 const float Y_JOYSTICK_STEP = 0.75;
@@ -83,9 +84,12 @@ Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(SERVO_SHIELD_ADDR);
 
 // function prototypes
 int16_t getServoPwm(servoID_t servoID, int16_t servoAngle);
-bool MoveFwdBack(float armPositionY, float armPositionZ);
+bool MoveArm(float *xPos, float *yPos1);
+float zHeightCorrection(float hypYZ);
 
 
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 void setup() 
 {
  
@@ -113,14 +117,15 @@ void setup()
 
 
 
+// ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 void loop() 
 {
   static float xPosMM =        0.0;  // X position in mm
-  static float yPosMM =       75.0;  // Y position in mmm
+  static float yPosMM =       75.0;  // Y position in mm
   static float effectorAngle = 0.0;  // Effector angle +/190
   static float effectorAngleOld = 0.0; // Previous effector angle  
 
-    
 
   // Move robot arm forward
   bool moveStatus; // whether move was okay or went into restrected regions
@@ -204,10 +209,13 @@ void loop()
     
 }  // end loop()
 
+
+// ---------------------------------------------------------------------------
+// Inverse kinematic to position the arm
+// ---------------------------------------------------------------------------
 bool MoveArm(float *xPos, float *yPos1)
 {
   
-  // Inverse kinematic to position the arm
   const float BICEP_LEN_MM =   140.0;  // bicep length in mm
   const float FOREARM_LEN_MM = 153.0;  // forarm length in mm
 
@@ -297,9 +305,11 @@ bool MoveArm(float *xPos, float *yPos1)
   
 }  // end MoveArm()
 
+// ---------------------------------------------------------------------------
 
 // Trying to move arm forward and back in y-Z plane while keeping Z constant doesn't work very perfectly.  Not sure if it an issue with the
 // IK calculations or something mechanical.  The function tries to compensate and keep Z height relatively constant
+// ---------------------------------------------------------------------------
 float zHeightCorrection(float hypYZ)
 {
   float zOffset = Z_POSITION;
@@ -319,11 +329,11 @@ float zHeightCorrection(float hypYZ)
 }  // end adjustZPos()
 
 
-
+// ---------------------------------------------------------------------------
 // for each servo, returns the PWM value for a give angle
+// ---------------------------------------------------------------------------
 int16_t getServoPwm(servoID_t servoID, int16_t servoAngle)
 {
-
   switch (servoID)
   {
     case SERVO_EFFECTOR:
@@ -342,7 +352,6 @@ int16_t getServoPwm(servoID_t servoID, int16_t servoAngle)
       return 300;
       break;
   } 
-  
 }  // end getServoPwm()
 
 
