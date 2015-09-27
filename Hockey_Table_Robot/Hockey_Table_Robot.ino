@@ -45,10 +45,12 @@ Change Log
 09/15/15 - 1.03 - Inverse kinematics are working, but not for the entire range of motion
 09/24/15 - 1.04 - Fine tuning IK
 09/25/15 - 1.05 - More fine tuning. Pass pointer to MoveFwdBack().  Added pwm compensation to bicep to keep effector level
+09/25/15 - 1.06 - Added D6 to detect blue vs green side
 */
 
-#define VERSION "v1.05"
+#define VERSION "v1.06"
 //#define PRINT_DEBUG
+
 
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
@@ -69,12 +71,18 @@ const uint8_t JOYSTICK_LEFT =  10;
 const uint8_t JOYSTICK_RIGHT =  9;
 const uint8_t JOYSTICK_BUTTON = 8;
 const uint8_t AIR_SOLENOID =    7;
+const uint8_t BLUE_SIDE =       6;  // D6 on blue side is tied to ground.
 
 const uint8_t EFFECTOR_INPUT = A1; // Pot for effector connected to Analog in
-const float Z_POSITION = -60; 
+
+const float z_POSITION_BLUE =  -60.0;
+const float Z_POSITION_GREEN = -88.0;
+float g_zPosition; 
+bool  g_isBlueSide; 
+
 const uint16_t Y_START =  75; 
 const uint16_t Y_MIN =    25; 
-const uint16_t Y_MAX =   177; 
+const uint16_t Y_MAX =   177;  
 
 // Serial.print really slows things down, compensate by makinng steps bigger
 #ifdef PRINT_DEBUG
@@ -109,13 +117,27 @@ void setup()
   pinMode(JOYSTICK_LEFT,   INPUT_PULLUP);
   pinMode(JOYSTICK_RIGHT,  INPUT_PULLUP);
   pinMode(JOYSTICK_BUTTON, INPUT_PULLUP);
+  pinMode(BLUE_SIDE,       INPUT_PULLUP);
   pinMode(AIR_SOLENOID,          OUTPUT);
-
+  delay(100);
+  
+  if (digitalRead(BLUE_SIDE) == HIGH )
+  { 
+    g_zPosition = Z_POSITION_GREEN; 
+    g_isBlueSide = false;
+  }
+  else
+  { 
+    g_zPosition = z_POSITION_BLUE; 
+    g_isBlueSide = true;
+  }
+  
+  
   // Initial position for robot arm
   pwm.setPWM(SERVO_ROTATE,   0, getServoPwm(SERVO_ROTATE, 0));
   pwm.setPWM(SERVO_EFFECTOR, 0, getServoPwm(SERVO_EFFECTOR, map(analogRead(EFFECTOR_INPUT), 0, 505, 45, -45)));
   float yStart = Y_START;
-  float zStart = Z_POSITION;
+  float zStart = g_zPosition;
   MoveFwdBack(&yStart, &zStart);
   
 }  // end setup()
@@ -126,7 +148,7 @@ void setup()
 void loop() 
 {
   static float yPos =         Y_START;  // Y position in mm
-  static float zPos =      Z_POSITION;  // Z position in mm, should always be the same
+  static float zPos =     g_zPosition;  // Z position in mm, should always be the same
   static float rotateAngle =      0.0;  // Angle of arm +/- 90
   static float effectorAngle =    0.0;  // Effector angle +/190
   static float effectorAngleOld = 0.0;  // Previous effector angle  
@@ -204,19 +226,19 @@ void loop()
    digitalWrite(AIR_SOLENOID, !digitalRead(JOYSTICK_BUTTON));
 
   #ifdef PRINT_DEBUG
-    Serial.print("Y:");
-    Serial.print(yPos);
-    Serial.print("  Z:");
-    Serial.print(zPos);
-    Serial.print("  A:");
-    Serial.print(rotateAngle);
-    Serial.print(" ");
-    Serial.print(getServoPwm(SERVO_ROTATE, rotateAngle));
-    Serial.print("  E:");
-    Serial.print(effectorAngle);
-    Serial.println();
+//    Serial.print("Y:");
+//    Serial.print(yPos);
+//    Serial.print("  Z:");
+//    Serial.print(zPos);
+//    Serial.print("  A:");
+//    Serial.print(rotateAngle);
+//    Serial.print(" ");
+//    Serial.print(getServoPwm(SERVO_ROTATE, rotateAngle));
+//    Serial.print("  E:");
+//    Serial.print(effectorAngle);
+//    Serial.println();
   #endif
-    
+   
 }  // end loop()
 
 
@@ -260,7 +282,12 @@ bool MoveFwdBack(float *armPositionY, float *armPositionZ)
 
   if (angle2degree != angle2degree )
   { return false; }
-  
+//  Serial.print(pwmBicep);
+//  Serial.print("  ");
+//  Serial.print(bicepPwmCompensation(*armPositionY));
+//  Serial.print("  ");
+//  Serial.print(*armPositionY);
+//  Serial.println();
   pwm.setPWM(SERVO_BICEP,   0, pwmBicep + bicepPwmCompensation(*armPositionY));  // Manualy adjust Bicep to keep effector level
   pwm.setPWM(SERVO_FOREARM, 0, pwmForearm);
   
@@ -299,7 +326,12 @@ int16_t getServoPwm(servoID_t servoID, int16_t servoAngle)
 // ---------------------------------------------------------------------------
 float bicepPwmCompensation(float y)
 {
-  float bicepComp = (0.003375 * y * y) - (1.021 * y) + 18.217;
+  float bicepComp;
+  if ( g_isBlueSide )
+  { bicepComp = (0.003375 * y * y) - (1.021 * y) + 18.217; }
+  else
+  { bicepComp = (0.002215 * y * y) - (0.801 * y) + 16.852; }
+  
   return bicepComp;
 }  // end bicepPwmCompensation()
 
@@ -314,7 +346,7 @@ float bicepPwmCompensation(float y)
 float zCompensation(float y)
 {
 //  float newZ =  (-0.0027 * y  * y) + (0.837 * y) - 89.64;
-//  return newZ + Z_POSITION; 
+//  return newZ + g_zPosition; 
 }  // end zCompensation()
 
 
