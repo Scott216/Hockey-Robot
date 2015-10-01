@@ -1,11 +1,17 @@
 /*
-Board: Uno
+Board: Arduino Uno
 
 Source code: https://github.com/Scott216/Hockey-Robot
 
-Program uses Arduino Uno with Adafruit I2C servo shield to control two robotic arms mounted to a hockey table
+This program uses Arduino Uno with Adafruit I2C servo shield to control a robotic arm mounted to a hockey table
 Users can move arms back and forth and flick the hockey puck.  Flicking the hockey puck uses a spring loaded
-mechanism.
+mechanism.  There is one Uno for each arm.  Because the servos are not exactly the same, one Uno has D6 connected to ground.
+This way you can upload the same sketch to both Unos, but the sketch will know which Uno it's connected too.
+
+To Do:
+- Prevent user from holding down trigger non-stop to keep air on. Turn air off after a second, for a second or something like that
+- Let arm move into back wall a bit more
+
 
 Note: Using serial.print() really slows down servo speed a lot
 
@@ -46,9 +52,10 @@ Change Log
 09/24/15 - 1.04 - Fine tuning IK
 09/25/15 - 1.05 - More fine tuning. Pass pointer to MoveFwdBack().  Added pwm compensation to bicep to keep effector level
 09/25/15 - 1.06 - Added D6 to detect blue vs green side
+09/30/15 - 1.07 - A little cleanup
 */
 
-#define VERSION "v1.06"
+#define VERSION "v1.07"
 //#define PRINT_DEBUG
 
 
@@ -84,14 +91,8 @@ const uint16_t Y_START =  75;
 const uint16_t Y_MIN =    25; 
 const uint16_t Y_MAX =   177;  
 
-// Serial.print really slows things down, compensate by makinng steps bigger
-#ifdef PRINT_DEBUG
-  const float JOYSTICK_STEP_FWDBACK = 0.75;
-  const float JOYSTICK_STEP_LR = 3.0;
-  #else
-  const float JOYSTICK_STEP_FWDBACK = 0.75;
-  const float JOYSTICK_STEP_LR = 0.25;
-#endif
+const float JOYSTICK_STEP_FWDBACK = 0.75;
+const float JOYSTICK_STEP_LR = 0.25;
 
 Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver(SERVO_SHIELD_ADDR);
 
@@ -226,17 +227,17 @@ void loop()
    digitalWrite(AIR_SOLENOID, !digitalRead(JOYSTICK_BUTTON));
 
   #ifdef PRINT_DEBUG
-//    Serial.print("Y:");
-//    Serial.print(yPos);
-//    Serial.print("  Z:");
-//    Serial.print(zPos);
-//    Serial.print("  A:");
-//    Serial.print(rotateAngle);
-//    Serial.print(" ");
-//    Serial.print(getServoPwm(SERVO_ROTATE, rotateAngle));
-//    Serial.print("  E:");
-//    Serial.print(effectorAngle);
-//    Serial.println();
+    Serial.print("Y:");
+    Serial.print(yPos);
+    Serial.print("  Z:");
+    Serial.print(zPos);
+    Serial.print("  A:");
+    Serial.print(rotateAngle);
+    Serial.print(" ");
+    Serial.print(getServoPwm(SERVO_ROTATE, rotateAngle));
+    Serial.print("  E:");
+    Serial.print(effectorAngle);
+    Serial.println();
   #endif
    
 }  // end loop()
@@ -282,12 +283,6 @@ bool MoveFwdBack(float *armPositionY, float *armPositionZ)
 
   if (angle2degree != angle2degree )
   { return false; }
-//  Serial.print(pwmBicep);
-//  Serial.print("  ");
-//  Serial.print(bicepPwmCompensation(*armPositionY));
-//  Serial.print("  ");
-//  Serial.print(*armPositionY);
-//  Serial.println();
   pwm.setPWM(SERVO_BICEP,   0, pwmBicep + bicepPwmCompensation(*armPositionY));  // Manualy adjust Bicep to keep effector level
   pwm.setPWM(SERVO_FOREARM, 0, pwmForearm);
   
